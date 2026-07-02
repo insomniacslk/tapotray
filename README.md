@@ -30,6 +30,14 @@ Build with
 go build
 ```
 
+Install the binary, desktop entry and icons under `~/.local` with
+```
+make install
+```
+(use `PREFIX=/usr/local sudo make install` for a system-wide install). To
+start it automatically when logging into the desktop session, run
+`make autostart`. `make uninstall` removes everything.
+
 Create a configuration file at `~/.config/tapotray/config.yaml` with content similar
 to [config.yaml.example](./config.yaml.example), or run `tapotray edit` to open
 it in `EDITOR` (pre-filled with a template on first run) and validate it.
