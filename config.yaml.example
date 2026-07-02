@@ -1,0 +1,22 @@
+email: "your tapo account email"
+password: "your tapo account password"
+# how often to refresh the device states. Set to 0 to disable background refresh.
+update_interval: 1m
+# find Tapo devices on the local network at startup via UDP broadcast
+# discovery. Mutually exclusive with cloud_list.
+discover: true
+# get the device list from the TP-Link cloud account at startup. The local
+# addresses are resolved via the system ARP table. Mutually exclusive with
+# discover.
+cloud_list: false
+# set to true to log the tapo protocol exchanges to stderr
+debug: false
+# explicit list of devices, useful when they don't answer discovery or are on
+# another network. Can be omitted if discover or cloud_list is set.
+#devices:
+#    # name is optional: if empty, the device's nickname is used
+#  - name: "Desk lamp"
+#    address: 192.168.1.10
+#    # type is "plug" (the default) or "bulb"
+#    type: plug
+#  - address: 192.168.1.11

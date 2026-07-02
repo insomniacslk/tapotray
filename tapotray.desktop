@@ -1,0 +1,16 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+
+Name=tapotray
+GenericName=Tapo Plug Control
+Comment=GNOME widget to control TP-Link Tapo smart plugs
+Categories=System;GNOME;GTK;
+Keywords=gnome;utils;tapo;smartplug;
+
+Icon=tapotray
+Exec=tapotray
+Terminal=false
+
+SingleMainWindow=true
+X-GNOME-UsesNotifications=true
