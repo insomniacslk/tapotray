@@ -4,6 +4,7 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 )
 
@@ -15,6 +16,16 @@ var (
 	// one pending request, so that senders never block.
 	windowUpdates = make(chan struct{}, 1)
 )
+
+const (
+	windowColumns   = 3
+	windowMaxHeight = 700
+)
+
+// shownDevices is the number of devices in the last drawn window. The window
+// is resized to fit its content only when it changes, so that a resize by the
+// user is not undone by every state refresh. Only used by drawWindow.
+var shownDevices = -1
 
 // requestWindowUpdate asks for the device window to be redrawn. It never
 // blocks, so it is safe to call with device locks held.
@@ -82,23 +93,27 @@ func drawWindow(cfg *Config) {
 		}
 	}
 	box := container.NewVBox()
-	if len(plugs) > 0 {
-		box.Add(widget.NewLabelWithStyle("Plugs", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}))
-		for _, o := range plugs {
-			box.Add(o)
+	section := func(title string, buttons []fyne.CanvasObject) {
+		if len(buttons) == 0 {
+			return
 		}
+		box.Add(widget.NewLabelWithStyle(title, fyne.TextAlignLeading, fyne.TextStyle{Bold: true}))
+		box.Add(container.NewGridWithColumns(windowColumns, buttons...))
 	}
-	if len(bulbs) > 0 {
-		box.Add(widget.NewLabelWithStyle("Bulbs", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}))
-		for _, o := range bulbs {
-			box.Add(o)
-		}
-	}
+	section("Plugs", plugs)
+	section("Bulbs", bulbs)
 	if len(devices) == 0 {
 		box.Add(widget.NewLabel("No devices"))
 	}
 	fyne.Do(func() {
 		window.SetContent(container.NewVScroll(box))
-		window.Resize(fyne.NewSize(280, window.Content().MinSize().Height+20))
+		if len(devices) != shownDevices {
+			// the scroll container has no minimum height of its own, so the
+			// size has to come from the content
+			size := box.MinSize().AddWidthHeight(theme.Padding()*2, theme.Padding()*2)
+			size.Height = min(size.Height, windowMaxHeight)
+			window.Resize(size)
+			shownDevices = len(devices)
+		}
 	})
 }
