@@ -6,6 +6,9 @@ The tray menu has a section for plugs and one for bulbs. Each device appears
 as a checkbox showing its current state; click it to toggle the device on or
 off. The states are refreshed in background at the configured interval.
 
+"Show window" in the tray menu opens an independent window with one button
+per device, highlighted when the device is on. Closing it only hides it.
+
 Plugs that support power monitoring (e.g. P110/P115) show their instant power
 consumption next to their name, and the "Energy usage" submenu reports, for
 each of them, the instant power and the energy used today, in the last 7

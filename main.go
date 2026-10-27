@@ -31,8 +31,11 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to open config file: %v", err)
 	}
-	systray.Run(
-		func() { onReady(cfg) },
-		onExit,
-	)
+	// Fyne needs the main thread for its event loop, so the tray runs with
+	// an external loop.
+	a := initWindow(cfg)
+	start, end := systray.RunWithExternalLoop(func() { onReady(cfg) }, onExit)
+	start()
+	a.Run()
+	end()
 }

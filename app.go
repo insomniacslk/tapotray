@@ -175,6 +175,8 @@ type DeviceItem struct {
 	mu   sync.Mutex
 	name string
 	plug *tapo.Plug
+	// on is the last known power state of the device.
+	on bool
 	// energySupport is nil until it is known whether the device supports
 	// power monitoring.
 	energySupport *bool
@@ -379,6 +381,7 @@ func (d *DeviceItem) refreshLocked(cfg *Config) {
 		d.withItem(func(item *systray.MenuItem) {
 			item.SetTitle(fmt.Sprintf("%s (%s)", d.label(), suffix))
 		})
+		requestWindowUpdate()
 		return
 	}
 	if d.name == "" && info.DecodedNickname != "" {
@@ -388,6 +391,8 @@ func (d *DeviceItem) refreshLocked(cfg *Config) {
 	if d.kind == kindPlug && (d.energySupport == nil || *d.energySupport) {
 		suffix = d.refreshEnergyLocked(cfg)
 	}
+	d.on = info.DeviceON
+	requestWindowUpdate()
 	d.withItem(func(item *systray.MenuItem) {
 		item.SetTitle(d.label() + suffix)
 		item.SetTooltip(fmt.Sprintf("Toggle the Tapo %s at %s", d.kind, d.addr))
@@ -410,10 +415,10 @@ func (d *DeviceItem) refresh(cfg *Config) {
 func (d *DeviceItem) toggle(cfg *Config) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	var turnOn bool
-	if !d.withItem(func(item *systray.MenuItem) { turnOn = !item.Checked() }) {
+	if !d.withItem(func(*systray.MenuItem) {}) {
 		return
 	}
+	turnOn := !d.on
 	logrus.Infof("Turning %s %s %q (%s)", onOff(turnOn), d.kind, d.label(), d.addr)
 	err := d.withSession(cfg, func(plug *tapo.Plug) error {
 		return plug.SetDeviceInfo(turnOn)
@@ -451,6 +456,7 @@ func addDevice(dc DeviceConfig, fromConfig bool) {
 		return
 	}
 	deviceItems = append(deviceItems, di)
+	requestWindowUpdate()
 }
 
 // removeDynamicDevices removes all the devices that don't come from the
@@ -467,6 +473,7 @@ func removeDynamicDevices() {
 		}
 	}
 	deviceItems = kept
+	requestWindowUpdate()
 }
 
 // kindOfDeviceType maps a Tapo device type like "SMART.TAPOPLUG" to a device
@@ -636,6 +643,7 @@ func onReady(cfg *Config) {
 		"Get the list of devices from the TP-Link cloud account",
 		cfg.CloudList,
 	)
+	mWindow := systray.AddMenuItem("Show window", "Open a window with a button per device")
 	mEnergy = systray.AddMenuItem("Energy usage", "Power consumption of the plugs that support monitoring")
 	mEnergy.Hide()
 	if cfg.updateInterval > 0 {
@@ -686,6 +694,9 @@ func onReady(cfg *Config) {
 			select {
 			case <-mQuit.ClickedCh:
 				systray.Quit()
+				quitWindow()
+			case <-mWindow.ClickedCh:
+				showWindow()
 			case <-mRefresh.ClickedCh:
 				refreshAll(cfg)
 			case <-mUpdate.ClickedCh:
