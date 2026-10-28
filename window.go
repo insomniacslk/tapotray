@@ -1,6 +1,10 @@
 package main
 
 import (
+	"cmp"
+	"slices"
+	"strings"
+
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/container"
@@ -75,23 +79,43 @@ func drawWindow(cfg *Config) {
 	copy(devices, deviceItems)
 	deviceItemsMutex.Unlock()
 
-	var plugs, bulbs []fyne.CanvasObject
+	type entry struct {
+		label string
+		on    bool
+		di    *DeviceItem
+	}
+	var plugEntries, bulbEntries []entry
 	for _, di := range devices {
 		di.mu.Lock()
-		label, on := di.label(), di.on
+		e := entry{label: di.label(), on: di.on, di: di}
 		di.mu.Unlock()
-		btn := widget.NewButton(label, func() {
-			go di.toggle(cfg)
-		})
-		if on {
-			btn.Importance = widget.HighImportance
-		}
 		if di.kind == kindBulb {
-			bulbs = append(bulbs, btn)
+			bulbEntries = append(bulbEntries, e)
 		} else {
-			plugs = append(plugs, btn)
+			plugEntries = append(plugEntries, e)
 		}
 	}
+
+	buttons := func(entries []entry) []fyne.CanvasObject {
+		slices.SortFunc(entries, func(a, b entry) int {
+			return cmp.Or(
+				cmp.Compare(strings.ToLower(a.label), strings.ToLower(b.label)),
+				cmp.Compare(a.label, b.label),
+			)
+		})
+		var ret []fyne.CanvasObject
+		for _, e := range entries {
+			btn := widget.NewButton(e.label, func() {
+				go e.di.toggle(cfg)
+			})
+			if e.on {
+				btn.Importance = widget.HighImportance
+			}
+			ret = append(ret, btn)
+		}
+		return ret
+	}
+	plugs, bulbs := buttons(plugEntries), buttons(bulbEntries)
 	box := container.NewVBox()
 	section := func(title string, buttons []fyne.CanvasObject) {
 		if len(buttons) == 0 {
