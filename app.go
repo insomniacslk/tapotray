@@ -1,12 +1,14 @@
 package main
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"io"
 	"log"
 	"os"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -129,7 +131,8 @@ func (p *slotPool) assign(di *DeviceItem) bool {
 		}
 		s.di = di
 		di.slot = s
-		s.item.SetTitle(di.label())
+		di.title = di.label()
+		s.item.SetTitle(di.title)
 		s.item.SetTooltip(fmt.Sprintf("Toggle the Tapo %s at %s", di.kind, di.addr))
 		s.item.Uncheck()
 		s.item.Show()
@@ -177,6 +180,9 @@ type DeviceItem struct {
 	plug *tapo.Plug
 	// on is the last known power state of the device.
 	on bool
+	// title is the text of the device's menu item, kept so that the item can
+	// be redrawn when the device moves to another slot.
+	title string
 	// energySupport is nil until it is known whether the device supports
 	// power monitoring.
 	energySupport *bool
@@ -358,7 +364,8 @@ func (d *DeviceItem) refreshEnergyLocked(cfg *Config) string {
 func (d *DeviceItem) refreshLocked(cfg *Config) {
 	if time.Now().Before(d.blockedUntil) {
 		d.withItem(func(item *systray.MenuItem) {
-			item.SetTitle(fmt.Sprintf("%s (locked out)", d.label()))
+			d.title = fmt.Sprintf("%s (locked out)", d.label())
+			item.SetTitle(d.title)
 			item.SetTooltip(fmt.Sprintf(
 				"The device refused local access (HTTP 403); retrying after %s. Power-cycle it to clear the block, then click to retry",
 				d.blockedUntil.Format("15:04"),
@@ -379,7 +386,8 @@ func (d *DeviceItem) refreshLocked(cfg *Config) {
 			suffix = "locked out"
 		}
 		d.withItem(func(item *systray.MenuItem) {
-			item.SetTitle(fmt.Sprintf("%s (%s)", d.label(), suffix))
+			d.title = fmt.Sprintf("%s (%s)", d.label(), suffix)
+			item.SetTitle(d.title)
 		})
 		requestWindowUpdate()
 		return
@@ -394,7 +402,8 @@ func (d *DeviceItem) refreshLocked(cfg *Config) {
 	d.on = info.DeviceON
 	requestWindowUpdate()
 	d.withItem(func(item *systray.MenuItem) {
-		item.SetTitle(d.label() + suffix)
+		d.title = d.label() + suffix
+		item.SetTitle(d.title)
 		item.SetTooltip(fmt.Sprintf("Toggle the Tapo %s at %s", d.kind, d.addr))
 		if info.DeviceON {
 			item.Check()
@@ -457,6 +466,68 @@ func addDevice(dc DeviceConfig, fromConfig bool) {
 	}
 	deviceItems = append(deviceItems, di)
 	requestWindowUpdate()
+}
+
+// sortSlots reorders the menu items of the pool by device name, so that the
+// menu lists the devices alphabetically whatever the order they were found
+// in. The slots stay where they are; the devices move between them. Must be
+// called with rebuildMutex held.
+func sortSlots(p *slotPool, kind deviceKind) {
+	deviceItemsMutex.Lock()
+	var devices []*DeviceItem
+	for _, di := range deviceItems {
+		if di.kind == kind {
+			devices = append(devices, di)
+		}
+	}
+	deviceItemsMutex.Unlock()
+	if len(devices) < 2 {
+		return
+	}
+	// hold the lock of every device, so that no toggle or refresh uses a slot
+	// while it is handed over. Other code holds one device lock at a time.
+	type keyed struct {
+		di    *DeviceItem
+		label string
+	}
+	var sorted []keyed
+	for _, di := range devices {
+		di.mu.Lock()
+		defer di.mu.Unlock()
+		sorted = append(sorted, keyed{di, di.label()})
+	}
+	slices.SortStableFunc(sorted, func(a, b keyed) int {
+		return cmp.Or(
+			cmp.Compare(strings.ToLower(a.label), strings.ToLower(b.label)),
+			cmp.Compare(a.label, b.label),
+		)
+	})
+	var slots []*MenuSlot
+	for _, s := range p.slots {
+		s.mu.Lock()
+		occupied := s.di != nil
+		s.mu.Unlock()
+		if occupied {
+			slots = append(slots, s)
+		}
+	}
+	if len(slots) != len(sorted) {
+		return
+	}
+	for i, k := range sorted {
+		s := slots[i]
+		s.mu.Lock()
+		s.di = k.di
+		k.di.slot = s
+		s.item.SetTitle(k.di.title)
+		s.item.SetTooltip(fmt.Sprintf("Toggle the Tapo %s at %s", k.di.kind, k.di.addr))
+		if k.di.on {
+			s.item.Check()
+		} else {
+			s.item.Uncheck()
+		}
+		s.mu.Unlock()
+	}
 }
 
 // removeDynamicDevices removes all the devices that don't come from the
@@ -598,6 +669,8 @@ func refreshAllLocked(cfg *Config) {
 		}(di)
 	}
 	wg.Wait()
+	sortSlots(plugPool, kindPlug)
+	sortSlots(bulbPool, kindBulb)
 }
 
 func refreshAll(cfg *Config) {
