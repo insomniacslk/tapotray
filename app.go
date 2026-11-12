@@ -76,12 +76,6 @@ var (
 
 	plugPool *slotPool
 	bulbPool *slotPool
-
-	// mEnergy is the "Energy usage" submenu, with one entry per plug that
-	// supports power monitoring. Hidden while empty.
-	mEnergy     *systray.MenuItem
-	energyMutex sync.Mutex
-	energyCount int
 )
 
 // MenuSlot is a pre-created menu item that a device can be assigned to.
@@ -142,28 +136,6 @@ func (p *slotPool) assign(di *DeviceItem) bool {
 	return false
 }
 
-func addEnergyLine(title string) *systray.MenuItem {
-	energyMutex.Lock()
-	defer energyMutex.Unlock()
-	item := mEnergy.AddSubMenuItem(title, "")
-	item.Disable()
-	energyCount++
-	if energyCount == 1 {
-		mEnergy.Show()
-	}
-	return item
-}
-
-func removeEnergyLine(item *systray.MenuItem) {
-	energyMutex.Lock()
-	defer energyMutex.Unlock()
-	item.Remove()
-	energyCount--
-	if energyCount == 0 {
-		mEnergy.Hide()
-	}
-}
-
 // DeviceItem ties a Tapo device, configured or found via a source, to its
 // menu slot.
 type DeviceItem struct {
@@ -186,7 +158,12 @@ type DeviceItem struct {
 	// energySupport is nil until it is known whether the device supports
 	// power monitoring.
 	energySupport *bool
-	energyItem    *systray.MenuItem
+	// info, energy and usage are the last known device details, shown in the
+	// window. energy and usage are nil if unknown or if the device does not
+	// support power monitoring.
+	info   *tapo.DeviceInfo
+	energy *tapo.EnergyUsage
+	usage  *tapo.DeviceUsage
 	// blockedUntil is the end of the cooldown after the device refused
 	// local access with HTTP 403. Background refreshes are skipped until
 	// then; manual toggles still go through.
@@ -213,8 +190,7 @@ func (d *DeviceItem) withItem(fn func(item *systray.MenuItem)) bool {
 	return true
 }
 
-// release unbinds the device from its menu slot, hiding the menu item, and
-// removes its energy usage entry if any.
+// release unbinds the device from its menu slot, hiding the menu item.
 func (d *DeviceItem) release() {
 	d.slot.mu.Lock()
 	if d.slot.di == d {
@@ -223,12 +199,6 @@ func (d *DeviceItem) release() {
 		d.slot.item.Uncheck()
 	}
 	d.slot.mu.Unlock()
-	d.mu.Lock()
-	if d.energyItem != nil {
-		removeEnergyLine(d.energyItem)
-		d.energyItem = nil
-	}
-	d.mu.Unlock()
 }
 
 // klapLogger is like Config.tapoLogger, but never nil: unlike tapo.NewPlug,
@@ -312,7 +282,7 @@ func kwh(wattHours int) string {
 }
 
 // refreshEnergyLocked fetches the power consumption of a plug that may
-// support power monitoring, updating its energy usage entry. It returns a
+// support power monitoring, updating its energy usage. It returns a
 // suffix with the instant power for the plug's menu title. Must be called
 // with d.mu held.
 func (d *DeviceItem) refreshEnergyLocked(cfg *Config) string {
@@ -335,6 +305,7 @@ func (d *DeviceItem) refreshEnergyLocked(cfg *Config) string {
 			logrus.Infof("Plug %q (%s) does not support power monitoring", d.label(), d.addr)
 			no := false
 			d.energySupport = &no
+			d.energy, d.usage = nil, nil
 		} else {
 			logrus.Errorf("Failed to get power consumption of plug %q (%s): %v", d.label(), d.addr, err)
 		}
@@ -342,19 +313,8 @@ func (d *DeviceItem) refreshEnergyLocked(cfg *Config) string {
 	}
 	yes := true
 	d.energySupport = &yes
+	d.energy, d.usage = energy, usage
 	watts := float64(energy.CurrentPower) / 1000.0
-	line := fmt.Sprintf("%s: %.1f W now — %s today, %s last 7 days, %s last 30 days",
-		d.label(), watts,
-		kwh(usage.PowerUsage.Today), kwh(usage.PowerUsage.Past7), kwh(usage.PowerUsage.Past30),
-	)
-	if d.energyItem == nil {
-		// don't add an entry for a device that is being removed
-		if d.withItem(func(*systray.MenuItem) {}) {
-			d.energyItem = addEnergyLine(line)
-		}
-	} else {
-		d.energyItem.SetTitle(line)
-	}
 	return fmt.Sprintf(" (%.1f W)", watts)
 }
 
@@ -392,6 +352,7 @@ func (d *DeviceItem) refreshLocked(cfg *Config) {
 		requestWindowUpdate()
 		return
 	}
+	d.info = info
 	if d.name == "" && info.DecodedNickname != "" {
 		d.name = info.DecodedNickname
 	}
@@ -716,9 +677,7 @@ func onReady(cfg *Config) {
 		"Get the list of devices from the TP-Link cloud account",
 		cfg.CloudList,
 	)
-	mWindow := systray.AddMenuItem("Show window", "Open a window with a button per device")
-	mEnergy = systray.AddMenuItem("Energy usage", "Power consumption of the plugs that support monitoring")
-	mEnergy.Hide()
+	mWindow := systray.AddMenuItem("Show window", "Open a window with the devices, their details and energy usage")
 	if cfg.updateInterval > 0 {
 		mInterval := systray.AddMenuItem(
 			fmt.Sprintf("Device states will be refreshed every %s", cfg.updateInterval),
