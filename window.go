@@ -235,7 +235,7 @@ func drawWindow(cfg *Config) {
 		// the split is kept across redraws, so that the divider stays where
 		// the user put it
 		if split == nil {
-			split = container.NewHSplit(nil, nil)
+			split = container.NewHSplit(widget.NewLabel(""), widget.NewLabel(""))
 			window.SetContent(split)
 		}
 		split.Leading = container.NewVScroll(list)
